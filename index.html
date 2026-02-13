@@ -1,0 +1,26 @@
+//web app code
+
+<button onclick="connectBLE()">Connect to ESP32</button>
+<h1 id="bpmDisplay">-- BPM</h1>
+
+<script>
+async function connectBLE() {
+  try {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: ['heart_rate'] }]
+    });
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService('heart_rate');
+    const char = await service.getCharacteristic('heart_rate_measurement');
+    
+    char.startNotifications();
+    char.addEventListener('characteristicvaluechanged', (event) => {
+      const value = event.target.value;
+      // Heart rate is usually the second byte
+      document.getElementById('bpmDisplay').innerText = value.getUint8(1) + " BPM";
+    });
+  } catch (error) {
+    console.log("Error: " + error);
+  }
+}
+</script>

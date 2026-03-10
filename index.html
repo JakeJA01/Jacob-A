@@ -1,32 +1,86 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>Bio-Sensor Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; }
+        .card { background: #1e1e1e; border-radius: 15px; padding: 20px; margin: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        #status { font-weight: bold; color: #ff4444; }
+        .connected { color: #00ff00 !important; }
+        button { background: #007bff; color: white; border: none; padding: 15px 30px; border-radius: 25px; font-size: 16px; cursor: pointer; }
+        .data-val { font-size: 2.5em; color: #00d4ff; margin: 10px 0; }
+        canvas { max-width: 100%; margin-top: 20px; }
+    </style>
+</head>
 <body>
-  <h1>Pulse Ox Dashboard</h1>
-  <button onclick="connectBLE()">Connect to QT Py</button>
-  <div id="data">Waiting for data...</div>
 
-  <script>
-    async function connectBLE() {
-      const serviceUuid = "12345678-1234-1234-1234-123456789012";
-      const charUuid = "87654321-4321-4321-4321-210987654321";
+    <h1>Vitals Monitor</h1>
+    <div id="status">Status: Disconnected</div>
+    <br>
+    <button onclick="connectBLE()">Connect Sensor</button>
 
-      const device = await navigator.bluetooth.requestDevice({
-        filters: [{ name: 'QT_Py_ESP32S3' }],
-        optionalServices: [serviceUuid]
-      });
+    <div class="card">
+        <h3>Heart Rate</h3>
+        <div id="hr" class="data-val">-- BPM</div>
+    </div>
 
-      const server = await device.gatt.connect();
-      const service = await server.getPrimaryService(serviceUuid);
-      const characteristic = await service.getCharacteristic(charUuid);
+    <div class="card">
+        <h3>Oxygen Saturation</h3>
+        <div id="spo2" class="data-val">-- %</div>
+    </div>
 
-      characteristic.startNotifications();
-      characteristic.addEventListener('characteristicvaluechanged', (event) => {
-        const value = new TextDecoder().decode(event.target.value);
-        const [hr, spo2, conf] = value.split(',');
-        document.getElementById('data').innerHTML = 
-          `<h2>Heart Rate: ${hr} BPM</h2><h2>SpO2: ${spo2}%</h2><p>Confidence: ${conf}%</p>`;
-      });
-    }
-  </script>
+    <div class="card">
+        <canvas id="pulseChart" height="150"></canvas>
+    </div>
+
+    <script>
+        let chart;
+        const ctx = document.getElementById('pulseChart').getContext('2d');
+
+        // Initialize the Graph
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: Array(50).fill(''), datasets: [{ label: 'Pulse Wave', data: [], borderColor: '#00d4ff', tension: 0.4, borderWidth: 2, pointRadius: 0 }] },
+            options: { scales: { y: { display: false }, x: { display: false } }, animation: false }
+        });
+
+        async function connectBLE() {
+            const serviceUuid = "12345678-1234-1234-1234-123456789012";
+            const charUuid = "87654321-4321-4321-4321-210987654321";
+
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'QT_Py_ESP32S3' }],
+                    optionalServices: [serviceUuid]
+                });
+
+                const server = await device.gatt.connect();
+                document.getElementById('status').innerText = "Status: Connected";
+                document.getElementById('status').classList.add('connected');
+
+                const service = await server.getPrimaryService(serviceUuid);
+                const characteristic = await service.getCharacteristic(charUuid);
+
+                characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    const value = new TextDecoder().decode(event.target.value);
+                    const [hr, spo2, conf] = value.split(',');
+
+                    // Update Numbers
+                    document.getElementById('hr').innerText = hr + " BPM";
+                    document.getElementById('spo2').innerText = spo2 + "%";
+
+                    // Update Graph with "Heart Rate" as a proxy for the pulse
+                    chart.data.datasets[0].data.push(hr);
+                    if (chart.data.datasets[0].data.length > 50) chart.data.datasets[0].data.shift();
+                    chart.update();
+                });
+            } catch (error) {
+                console.log("Error: " + error);
+                alert("Connection failed. Make sure Bluetooth is on.");
+            }
+        }
+    </script>
 </body>
 </html>

@@ -4,47 +4,74 @@
     <title>Bio-Sensor Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; font-size: 18px; }
-        .card { background: #1e1e1e; border-radius: 15px; padding: 20px; margin: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        #status { font-weight: bold; color: #ff4444; font-size: 1.5em; margin-bottom: 20px;}
+        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; font-size: 1.2rem; }
+        .card { background: #1e1e1e; border-radius: 15px; padding: 20px; margin: 15px auto; max-width: 600px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        
+        /* Larger Fonts for Phone Visibility */
+        h1 { font-size: 2.5rem; margin-bottom: 10px; }
+        #status { font-weight: bold; color: #ff4444; font-size: 1.5rem; margin-bottom: 20px; }
         .connected { color: #00ff00 !important; }
-        /* padding 15px 30px, boarder 25px, font size 16px*/
-        button { background: #007bff; color: white; border: none; padding: 20px 40px; border-radius: 50px; font-size: 22px; cursor: pointer; }
-        .data-val { font-size: 2.5em; color: #00d4ff; margin: 10px 0; }
-        canvas { max-width: 100%; margin-top: 20px; }
+        
+        button { background: #007bff; color: white; border: none; padding: 20px 40px; border-radius: 50px; font-size: 1.5rem; cursor: pointer; transition: 0.3s; }
+        button:active { background: #0056b3; transform: scale(0.98); }
+
+        .label-text { font-size: 1.5rem; color: #aaaaaa; margin-bottom: 5px; }
+        .data-val { font-size: 4rem; font-weight: bold; color: #00d4ff; margin: 5px 0; font-family: monospace; }
+        
+        canvas { max-width: 100%; margin-top: 20px; height: 300px !important; }
     </style>
 </head>
 <body>
 
     <h1>Vitals Monitor</h1>
     <div id="status">Status: Disconnected</div>
-    <br>
     <button onclick="connectBLE()">Connect Sensor</button>
 
     <div class="card">
-        <h3>Heart Rate</h3>
-        <div id="hr" class="data-val">-- BPM</div>
+        <div class="label-text">IR Signal (Pulse Raw)</div>
+        <div id="ir_val" class="data-val">--</div>
     </div>
 
     <div class="card">
-        <h3>Oxygen Saturation</h3>
-        <div id="spo2" class="data-val">-- %</div>
+        <div class="label-text">Red Signal</div>
+        <div id="red_val" class="data-val">--</div>
     </div>
 
     <div class="card">
-        <canvas id="pulseChart" height="150"></canvas>
+        <canvas id="pulseChart"></canvas>
     </div>
-    
 
     <script>
         let chart;
         const ctx = document.getElementById('pulseChart').getContext('2d');
 
-        // Initialize the Graph
+        // Initialize Graph for RAW data
         chart = new Chart(ctx, {
             type: 'line',
-            data: { labels: Array(50).fill(''), datasets: [{ label: 'Pulse Wave', data: [], borderColor: '#00d4ff', tension: 0.4, borderWidth: 2, pointRadius: 0 }] },
-            options: { scales: { y: { display: false }, x: { display: false } }, animation: false }
+            data: { 
+                labels: Array(100).fill(''), 
+                datasets: [{ 
+                    label: 'IR Pulse Wave', 
+                    data: [], 
+                    borderColor: '#00d4ff', 
+                    tension: 0.3, 
+                    borderWidth: 3, 
+                    pointRadius: 0 
+                }] 
+            },
+            options: { 
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false, // Must be false for high-speed raw data
+                scales: { 
+                    y: { 
+                        display: true, 
+                        beginAtZero: false, // IMPORTANT: Raw IR data has a high DC offset
+                        grid: { color: '#333' }
+                    }, 
+                    x: { display: false } 
+                } 
+            }
         });
 
         async function connectBLE() {
@@ -64,23 +91,35 @@
                 const service = await server.getPrimaryService(serviceUuid);
                 const characteristic = await service.getCharacteristic(charUuid);
 
-                characteristic.startNotifications();
+                await characteristic.startNotifications();
+                
                 characteristic.addEventListener('characteristicvaluechanged', (event) => {
                     const value = new TextDecoder().decode(event.target.value);
-                    const [hr, spo2, conf] = value.split(',');
+                    const [ir, red] = value.split(',');
 
-                    // Update Numbers
-                    document.getElementById('hr').innerText = hr + " BPM";
-                    document.getElementById('spo2').innerText = spo2 + "%";
+                    // Convert to integers
+                    const irNum = parseInt(ir);
+                    const redNum = parseInt(red);
 
-                    // Update Graph with "Heart Rate" as a proxy for the pulse
-                    chart.data.datasets[0].data.push(hr);
-                    if (chart.data.datasets[0].data.length > 50) chart.data.datasets[0].data.shift();
-                    chart.update();
+                    // Update the Large Labels
+                    document.getElementById('ir_val').innerText = irNum;
+                    document.getElementById('red_val').innerText = redNum;
+
+                    // Update Graph
+                    chart.data.datasets[0].data.push(irNum);
+                    if (chart.data.datasets[0].data.length > 100) {
+                        chart.data.datasets[0].data.shift();
+                    }
+
+                    // Only update the chart visually every 2nd data point to save battery/CPU
+                    if (irNum % 2 === 0) {
+                        chart.update('none'); 
+                    }
                 });
+
             } catch (error) {
                 console.log("Error: " + error);
-                alert("Connection failed. Make sure Bluetooth is on.");
+                alert("Connection failed.");
             }
         }
     </script>

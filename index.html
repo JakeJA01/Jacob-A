@@ -4,11 +4,12 @@
     <title>Bio-Sensor Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; }
+        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; font-size: 18px; }
         .card { background: #1e1e1e; border-radius: 15px; padding: 20px; margin: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
         #status { font-weight: bold; color: #ff4444; }
         .connected { color: #00ff00 !important; }
-        button { background: #007bff; color: white; border: none; padding: 15px 30px; border-radius: 25px; font-size: 16px; cursor: pointer; }
+        /* padding 15px 30px, boarder 25px, font size 16px*/
+        button { background: #007bff; color: white; border: none; padding: 20px 40px; border-radius: 50px; font-size: 22px; cursor: pointer; }
         .data-val { font-size: 2.5em; color: #00d4ff; margin: 10px 0; }
         canvas { max-width: 100%; margin-top: 20px; }
     </style>
@@ -33,6 +34,7 @@
     <div class="card">
         <canvas id="pulseChart" height="150"></canvas>
     </div>
+    
 
     <script>
         let chart;

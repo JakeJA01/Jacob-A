@@ -5,8 +5,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #0f0f0f; color: white; padding: 20px; }
-        .container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; max-width: 1000px; margin: auto; }
-        .card { background: #1a1a1a; border-radius: 20px; padding: 25px; flex: 1; min-width: 280px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); border: 1px solid #333; }
+        .container { display: flex; flex-direction: column; align-items: center; gap: 20px; max-width: 600px; margin: auto; }
+        .card { background: #1a1a1a; border-radius: 20px; padding: 25px; width: 90%; max-width: 500px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); border: 1px solid #333; }
         h1 { font-size: 2.2rem; color: #00d4ff; }
         
         #status { font-size: 1.1rem; margin-bottom: 20px; color: #ff4444; transition: 0.3s; }
@@ -26,7 +26,7 @@
     <div id="status">Status: Disconnected</div>
     <button onclick="connectBLE()">Connect Sensor</button>
 
-    // <div class="container">
+    <div class="container">
         <div class="card">
             <div class="label-text">Heart Rate</div>
             <div class="data-val"><span id="bpm_val">--</span><span class="unit">BPM</span></div>

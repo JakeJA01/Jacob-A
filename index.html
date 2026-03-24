@@ -1,24 +1,23 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Bio-Sensor Dashboard</title>
+    <title>Bio-Sensor Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #121212; color: white; padding: 20px; font-size: 1.2rem; }
-        .card { background: #1e1e1e; border-radius: 15px; padding: 20px; margin: 15px auto; max-width: 600px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #0f0f0f; color: white; padding: 20px; }
+        .container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; max-width: 1000px; margin: auto; }
+        .card { background: #1a1a1a; border-radius: 20px; padding: 25px; flex: 1; min-width: 280px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); border: 1px solid #333; }
+        h1 { font-size: 2.2rem; color: #00d4ff; }
         
-        /* Larger Fonts for Phone Visibility */
-        h1 { font-size: 2.5rem; margin-bottom: 10px; }
-        #status { font-weight: bold; color: #ff4444; font-size: 1.5rem; margin-bottom: 20px; }
-        .connected { color: #00ff00 !important; }
+        #status { font-size: 1.1rem; margin-bottom: 20px; color: #ff4444; transition: 0.3s; }
+        .connected { color: #00ff00 !important; text-shadow: 0 0 10px #00ff0055; }
         
-        button { background: #007bff; color: white; border: none; padding: 20px 40px; border-radius: 50px; font-size: 1.5rem; cursor: pointer; transition: 0.3s; }
-        button:active { background: #0056b3; transform: scale(0.98); }
-
-        .label-text { font-size: 1.5rem; color: #aaaaaa; margin-bottom: 5px; }
-        .data-val { font-size: 4rem; font-weight: bold; color: #00d4ff; margin: 5px 0; font-family: monospace; }
-        
-        canvas { max-width: 100%; margin-top: 20px; height: 300px !important; }
+        button { background: #007bff; color: white; border: none; padding: 15px 35px; border-radius: 50px; font-size: 1.2rem; cursor: pointer; margin-bottom: 30px; }
+        .label-text { font-size: 1rem; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+        .data-val { font-size: 4.5rem; font-weight: 800; color: #fff; margin: 10px 0; font-family: 'Courier New', monospace; }
+        .unit { font-size: 1.2rem; color: #00d4ff; margin-left: 5px; }
+        .chart-container { width: 100%; max-width: 900px; margin: 20px auto; background: #1a1a1a; padding: 15px; border-radius: 20px; }
+        canvas { height: 250px !important; }
     </style>
 </head>
 <body>
@@ -27,50 +26,49 @@
     <div id="status">Status: Disconnected</div>
     <button onclick="connectBLE()">Connect Sensor</button>
 
-    <div class="card">
-        <div class="label-text">IR Signal (Pulse Raw)</div>
-        <div id="ir_val" class="data-val">--</div>
+    <div class="container">
+        <div class="card">
+            <div class="label-text">Heart Rate</div>
+            <div class="data-val"><span id="bpm_val">--</span><span class="unit">BPM</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label-text">Oxygen Level</div>
+            <div class="data-val"><span id="spo2_val">--</span><span class="unit">%</span></div>
+        </div>
     </div>
 
-    <div class="card">
-        <div class="label-text">Red Signal</div>
-        <div id="red_val" class="data-val">--</div>
-    </div>
-
-    <div class="card">
+    <div class="chart-container">
         <canvas id="pulseChart"></canvas>
     </div>
 
     <script>
         let chart;
+        const BUFFER_SIZE = 100; // Adjust based on sampling rate (approx 4-5 seconds)
+        let irBuffer = [];
+        let redBuffer = [];
+        
+        // Setup Chart
         const ctx = document.getElementById('pulseChart').getContext('2d');
-
-        // Initialize Graph for RAW data
         chart = new Chart(ctx, {
             type: 'line',
-            data: { 
-                labels: Array(100).fill(''), 
-                datasets: [{ 
-                    label: 'IR Pulse Wave', 
-                    data: [], 
-                    borderColor: '#00d4ff', 
-                    tension: 0.3, 
-                    borderWidth: 3, 
-                    pointRadius: 0 
-                }] 
+            data: {
+                labels: Array(BUFFER_SIZE).fill(''),
+                datasets: [{
+                    label: 'Pulse Wave (IR)',
+                    data: [],
+                    borderColor: '#00d4ff',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.4
+                }]
             },
-            options: { 
+            options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: false, // Must be false for high-speed raw data
-                scales: { 
-                    y: { 
-                        display: true, 
-                        beginAtZero: false, // IMPORTANT: Raw IR data has a high DC offset
-                        grid: { color: '#333' }
-                    }, 
-                    x: { display: false } 
-                } 
+                animation: false,
+                scales: { y: { display: false }, x: { display: false } },
+                plugins: { legend: { display: false } }
             }
         });
 
@@ -95,31 +93,70 @@
                 
                 characteristic.addEventListener('characteristicvaluechanged', (event) => {
                     const value = new TextDecoder().decode(event.target.value);
-                    const [ir, red] = value.split(',');
+                    const [ir, red] = value.split(',').map(Number);
 
-                    // Convert to integers
-                    const irNum = parseInt(ir);
-                    const redNum = parseInt(red);
+                    // Push to buffers
+                    irBuffer.push(ir);
+                    redBuffer.push(red);
 
-                    // Update the Large Labels
-                    document.getElementById('ir_val').innerText = irNum;
-                    document.getElementById('red_val').innerText = redNum;
-
-                    // Update Graph
-                    chart.data.datasets[0].data.push(irNum);
-                    if (chart.data.datasets[0].data.length > 100) {
-                        chart.data.datasets[0].data.shift();
+                    if (irBuffer.length > BUFFER_SIZE) {
+                        irBuffer.shift();
+                        redBuffer.shift();
                     }
 
-                    // Only update the chart visually every 2nd data point to save battery/CPU
-                    if (irNum % 2 === 0) {
-                        chart.update('none'); 
+                    // Update visualization
+                    updateVisualization(ir);
+
+                    // Run calculation every 10 samples for smoothness
+                    if (irBuffer.length === BUFFER_SIZE && irBuffer.length % 10 === 0) {
+                        processVitals();
                     }
                 });
 
             } catch (error) {
-                console.log("Error: " + error);
-                alert("Connection failed.");
+                console.error(error);
+                alert("Connection failed. Check BLE and name.");
+            }
+        }
+
+        function updateVisualization(val) {
+            chart.data.datasets[0].data.push(val);
+            if (chart.data.datasets[0].data.length > BUFFER_SIZE) chart.data.datasets[0].data.shift();
+            chart.update('none');
+        }
+
+        function processVitals() {
+            // 1. Calculate AC/DC for SpO2
+            const irDC = irBuffer.reduce((a, b) => a + b) / irBuffer.length;
+            const irAC = Math.max(...irBuffer) - Math.min(...irBuffer);
+            
+            const redDC = redBuffer.reduce((a, b) => a + b) / redBuffer.length;
+            const redAC = Math.max(...redBuffer) - Math.min(...redBuffer);
+
+            // Ratio of Ratios Formula
+            const R = (redAC / redDC) / (irAC / irDC);
+            let spo2 = 110 - (25 * R); 
+            if (spo2 > 100) spo2 = 100;
+
+            // 2. Heart Rate Peak Counting
+            let peaks = 0;
+            for (let i = 1; i < irBuffer.length - 1; i++) {
+                // Simple peak detection: higher than neighbors and above average
+                if (irBuffer[i] > irDC && irBuffer[i] > irBuffer[i-1] && irBuffer[i] > irBuffer[i+1]) {
+                    peaks++;
+                }
+            }
+            
+            // BPM = (Peaks / Time in Seconds) * 60
+            // Assuming ESP32 sends at ~20Hz (50ms delay). Adjust if your ESP32 is faster/slower!
+            const samplingRate = 20; 
+            const durationSeconds = BUFFER_SIZE / samplingRate;
+            const bpm = (peaks / durationSeconds) * 60;
+
+            // 3. UI Update (filter out noise/unrealistic values)
+            if (bpm > 40 && bpm < 180) {
+                document.getElementById('bpm_val').innerText = Math.round(bpm);
+                document.getElementById('spo2_val').innerText = Math.round(spo2);
             }
         }
     </script>

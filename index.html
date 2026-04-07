@@ -1,164 +1,139 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Bio-Sensor Pro</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #0f0f0f; color: white; padding: 20px; }
-        .container { display: flex; flex-direction: column; align-items: center; gap: 20px; max-width: 600px; margin: auto; }
-        .card { background: #1a1a1a; border-radius: 20px; padding: 25px; width: 90%; max-width: 500px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); border: 1px solid #333; }
-        h1 { font-size: 2.2rem; color: #00d4ff; }
-        
-        #status { font-size: 1.1rem; margin-bottom: 20px; color: #ff4444; transition: 0.3s; }
-        .connected { color: #00ff00 !important; text-shadow: 0 0 10px #00ff0055; }
-        
-        button { background: #007bff; color: white; border: none; padding: 15px 35px; border-radius: 50px; font-size: 1.2rem; cursor: pointer; margin-bottom: 30px; }
-        .label-text { font-size: 1rem; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-        .data-val { font-size: 4.5rem; font-weight: 800; color: #fff; margin: 10px 0; font-family: 'Courier New', monospace; }
-        .unit { font-size: 1.2rem; color: #00d4ff; margin-left: 5px; }
-        .chart-container { width: 100%; max-width: 900px; margin: 20px auto; background: #1a1a1a; padding: 15px; border-radius: 20px; }
-        canvas { height: 250px !important; }
-    </style>
-</head>
-<body>
+<script>
+    let chart;
+    const BUFFER_SIZE = 100; 
+    let irBuffer = [];
+    let redBuffer = [];
+    
+    // Smoothing Buffers
+    let bpmHistory = [];
+    const SMOOTHING_WINDOW = 5; // Average the last 5 readings
 
-    <h1>Vitals Monitor</h1>
-    <div id="status">Status: Disconnected</div>
-    <button onclick="connectBLE()">Connect Sensor</button>
-
-    <div class="container">
-        <div class="card">
-            <div class="label-text">Heart Rate</div>
-            <div class="data-val"><span id="bpm_val">--</span><span class="unit">BPM</span></div>
-        </div>
-
-        <div class="card">
-            <div class="label-text">Oxygen Level</div>
-            <div class="data-val"><span id="spo2_val">--</span><span class="unit">%</span></div>
-        </div>
-    </div>
-
-    <div class="chart-container">
-        <canvas id="pulseChart"></canvas>
-    </div>
-
-    <script>
-        let chart;
-        const BUFFER_SIZE = 100; // Adjust based on sampling rate (approx 4-5 seconds)
-        let irBuffer = [];
-        let redBuffer = [];
-        
-        // Setup Chart
-        const ctx = document.getElementById('pulseChart').getContext('2d');
-        chart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: Array(BUFFER_SIZE).fill(''),
-                datasets: [{
-                    label: 'Pulse Wave (IR)',
-                    data: [],
-                    borderColor: '#00d4ff',
-                    borderWidth: 2,
-                    pointRadius: 0,
-                    tension: 0.4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: false,
-                scales: { y: { display: false }, x: { display: false } },
-                plugins: { legend: { display: false } }
-            }
-        });
-
-        async function connectBLE() {
-            const serviceUuid = "12345678-1234-1234-1234-123456789012";
-            const charUuid = "87654321-4321-4321-4321-210987654321";
-
-            try {
-                const device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'QT_Py_ESP32S3' }],
-                    optionalServices: [serviceUuid]
-                });
-
-                const server = await device.gatt.connect();
-                document.getElementById('status').innerText = "Status: Connected";
-                document.getElementById('status').classList.add('connected');
-
-                const service = await server.getPrimaryService(serviceUuid);
-                const characteristic = await service.getCharacteristic(charUuid);
-
-                await characteristic.startNotifications();
-                
-                characteristic.addEventListener('characteristicvaluechanged', (event) => {
-                    const value = new TextDecoder().decode(event.target.value);
-                    const [ir, red] = value.split(',').map(Number);
-
-                    // Push to buffers
-                    irBuffer.push(ir);
-                    redBuffer.push(red);
-
-                    if (irBuffer.length > BUFFER_SIZE) {
-                        irBuffer.shift();
-                        redBuffer.shift();
-                    }
-
-                    // Update visualization
-                    updateVisualization(ir);
-
-                    // Run calculation every 10 samples for smoothness
-                    if (irBuffer.length === BUFFER_SIZE && irBuffer.length % 10 === 0) {
-                        processVitals();
-                    }
-                });
-
-            } catch (error) {
-                console.error(error);
-                alert("Connection failed. Check BLE and name.");
-            }
+    // Setup Chart
+    const ctx = document.getElementById('pulseChart').getContext('2d');
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: Array(BUFFER_SIZE).fill(''),
+            datasets: [{
+                label: 'Pulse Wave',
+                data: [],
+                borderColor: '#00d4ff',
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: { y: { display: false }, x: { display: false } },
+            plugins: { legend: { display: false } }
         }
+    });
 
-        function updateVisualization(val) {
-            chart.data.datasets[0].data.push(val);
-            if (chart.data.datasets[0].data.length > BUFFER_SIZE) chart.data.datasets[0].data.shift();
-            chart.update('none');
-        }
+    async function connectBLE() {
+        const serviceUuid = "12345678-1234-1234-1234-123456789012";
+        const charUuid = "87654321-4321-4321-4321-210987654321";
 
-        function processVitals() {
-            // 1. Calculate AC/DC for SpO2
-            const irDC = irBuffer.reduce((a, b) => a + b) / irBuffer.length;
-            const irAC = Math.max(...irBuffer) - Math.min(...irBuffer);
+        try {
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ name: 'QT_Py_ESP32S3' }],
+                optionalServices: [serviceUuid]
+            });
+
+            const server = await device.gatt.connect();
+            document.getElementById('status').innerText = "Status: Connected";
+            document.getElementById('status').classList.add('connected');
+
+            const service = await server.getPrimaryService(serviceUuid);
+            const characteristic = await service.getCharacteristic(charUuid);
+
+            await characteristic.startNotifications();
             
-            const redDC = redBuffer.reduce((a, b) => a + b) / redBuffer.length;
-            const redAC = Math.max(...redBuffer) - Math.min(...redBuffer);
+            characteristic.addEventListener('characteristicvaluechanged', (event) => {
+                const value = new TextDecoder().decode(event.target.value);
+                const parts = value.split(',');
+                if (parts.length < 2) return;
 
-            // Ratio of Ratios Formula
-            const R = (redAC / redDC) / (irAC / irDC);
-            let spo2 = 110 - (25 * R); 
-            if (spo2 > 100) spo2 = 100;
+                const ir = parseInt(parts[0]);
+                const red = parseInt(parts[1]);
 
-            // 2. Heart Rate Peak Counting
-            let peaks = 0;
-            for (let i = 1; i < irBuffer.length - 1; i++) {
-                // Simple peak detection: higher than neighbors and above average
-                if (irBuffer[i] > irDC && irBuffer[i] > irBuffer[i-1] && irBuffer[i] > irBuffer[i+1]) {
-                    peaks++;
+                irBuffer.push(ir);
+                redBuffer.push(red);
+
+                if (irBuffer.length > BUFFER_SIZE) {
+                    irBuffer.shift();
+                    redBuffer.shift();
                 }
-            }
-            
-            // BPM = (Peaks / Time in Seconds) * 60
-            // Assuming ESP32 sends at ~20Hz (50ms delay). Adjust if your ESP32 is faster/slower!
-            const samplingRate = 20; 
-            const durationSeconds = BUFFER_SIZE / samplingRate;
-            const bpm = (peaks / durationSeconds) * 60;
 
-            // 3. UI Update (filter out noise/unrealistic values)
-            if (bpm > 40 && bpm < 180) {
-                document.getElementById('bpm_val').innerText = Math.round(bpm);
-                document.getElementById('spo2_val').innerText = Math.round(spo2);
+                updateVisualization(ir);
+
+                // Run calculation every 10 samples (sliding window)
+                if (irBuffer.length === BUFFER_SIZE && ir % 10 === 0) {
+                    processVitals();
+                }
+            });
+
+        } catch (error) {
+            console.error(error);
+            alert("Connection failed.");
+        }
+    }
+
+    function updateVisualization(val) {
+        chart.data.datasets[0].data.push(val);
+        if (chart.data.datasets[0].data.length > BUFFER_SIZE) chart.data.datasets[0].data.shift();
+        chart.update('none');
+    }
+
+    function processVitals() {
+        // --- 1. PRE-PROCESSING ---
+        const irMax = Math.max(...irBuffer);
+        const irMin = Math.min(...irBuffer);
+        const irAvg = irBuffer.reduce((a, b) => a + b) / irBuffer.length;
+        const irAC = irMax - irMin;
+        
+        const redMax = Math.max(...redBuffer);
+        const redMin = Math.min(...redBuffer);
+        const redAvg = redBuffer.reduce((a, b) => a + b) / redBuffer.length;
+        const redAC = redMax - redMin;
+
+        // --- 2. PEAK DETECTION (With Noise Filter) ---
+        let peaks = 0;
+        // Sensitivity: Must be at least 10% above average to count as a peak
+        const threshold = irAvg + (irAC * 0.1); 
+        
+        for (let i = 1; i < irBuffer.length - 1; i++) {
+            if (irBuffer[i] > threshold && 
+                irBuffer[i] > irBuffer[i-1] && 
+                irBuffer[i] > irBuffer[i+1]) {
+                peaks++;
+                i += 4; // Skip a few samples to avoid "double counting" the same peak
             }
         }
-    </script>
-</body>
-</html>
+        
+        // --- 3. CALCULATION ---
+        const samplingRate = 20; // Matches delay(50) on ESP32
+        const durationSeconds = BUFFER_SIZE / samplingRate;
+        const rawBpm = (peaks / durationSeconds) * 60;
+
+        // SpO2 Ratio of Ratios
+        const R = (redAC / redAvg) / (irAC / irAvg);
+        let spo2 = 110 - (25 * R);
+        if (spo2 > 100) spo2 = 100;
+        if (spo2 < 85) spo2 = 85; // Floor it to avoid wild drops
+
+        // --- 4. SMOOTHING (Moving Average) ---
+        if (rawBpm > 45 && rawBpm < 160) {
+            bpmHistory.push(rawBpm);
+            if (bpmHistory.length > SMOOTHING_WINDOW) bpmHistory.shift();
+            
+            const smoothedBpm = bpmHistory.reduce((a, b) => a + b) / bpmHistory.length;
+
+            // Update UI
+            document.getElementById('bpm_val').innerText = Math.round(smoothedBpm);
+            document.getElementById('spo2_val').innerText = Math.round(spo2);
+        }
+    }
+</script>

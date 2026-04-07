@@ -1,139 +1,267 @@
-<script>
-    let chart;
-    const BUFFER_SIZE = 100; 
-    let irBuffer = [];
-    let redBuffer = [];
-    
-    // Smoothing Buffers
-    let bpmHistory = [];
-    const SMOOTHING_WINDOW = 5; // Average the last 5 readings
-
-    // Setup Chart
-    const ctx = document.getElementById('pulseChart').getContext('2d');
-    chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: Array(BUFFER_SIZE).fill(''),
-            datasets: [{
-                label: 'Pulse Wave',
-                data: [],
-                borderColor: '#00d4ff',
-                borderWidth: 2,
-                pointRadius: 0,
-                tension: 0.4
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            scales: { y: { display: false }, x: { display: false } },
-            plugins: { legend: { display: false } }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Vitals Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg: #0f0f0f;
+            --card-bg: #1a1a1a;
+            --accent: #00d4ff;
+            --success: #00ff00;
+            --warning: #ffff00;
+            --danger: #ff4444;
         }
-    });
 
-    async function connectBLE() {
-        const serviceUuid = "12345678-1234-1234-1234-123456789012";
-        const charUuid = "87654321-4321-4321-4321-210987654321";
+        body { 
+            font-family: 'Segoe UI', system-ui, sans-serif; 
+            background: var(--bg); 
+            color: white; 
+            margin: 0; 
+            padding: 20px; 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
 
-        try {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ name: 'QT_Py_ESP32S3' }],
-                optionalServices: [serviceUuid]
-            });
+        h1 { font-weight: 300; color: var(--accent); margin-bottom: 5px; }
+        #status { font-size: 0.9rem; margin-bottom: 20px; color: var(--danger); text-transform: uppercase; letter-spacing: 2px; }
+        .connected { color: var(--success) !important; text-shadow: 0 0 10px rgba(0,255,0,0.3); }
 
-            const server = await device.gatt.connect();
-            document.getElementById('status').innerText = "Status: Connected";
-            document.getElementById('status').classList.add('connected');
+        .container { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 20px; 
+            width: 100%; 
+            max-width: 500px; 
+        }
 
-            const service = await server.getPrimaryService(serviceUuid);
-            const characteristic = await service.getCharacteristic(charUuid);
+        .card { 
+            background: var(--card-bg); 
+            border-radius: 24px; 
+            padding: 25px; 
+            border: 1px solid #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: transform 0.2s ease;
+        }
 
-            await characteristic.startNotifications();
+        .label-text { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 1.5px; }
+        
+        .data-val { 
+            font-size: 4rem; 
+            font-weight: 800; 
+            margin: 5px 0; 
+            font-family: 'Courier New', monospace;
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+        }
+
+        .unit { font-size: 1.2rem; color: var(--accent); margin-left: 8px; font-weight: 400; }
+
+        /* BP Specific Styles */
+        .bp-input-group { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px; }
+        input[type="number"] { 
+            background: #252525; border: 1px solid #444; color: white; padding: 12px; 
+            border-radius: 12px; width: 70px; font-size: 1.2rem; text-align: center;
+        }
+        
+        /* Buttons */
+        button { 
+            background: var(--accent); color: black; border: none; padding: 15px 30px; 
+            border-radius: 50px; font-weight: bold; cursor: pointer; transition: 0.3s; 
+        }
+        .btn-sm { padding: 10px 20px; font-size: 0.8rem; }
+        button:active { transform: scale(0.95); opacity: 0.8; }
+
+        /* Animation */
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
+            70% { box-shadow: 0 0 0 15px rgba(0, 212, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
+        }
+        .beat { animation: pulse-ring 0.5s cubic-bezier(0.215, 0.61, 0.355, 1); }
+
+        canvas { height: 180px !important; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>Vitals Monitor</h1>
+    <div id="status">Disconnected</div>
+    <button id="connectBtn" onclick="connectBLE()" style="margin-bottom: 30px;">Connect Sensor</button>
+
+    <div class="container">
+        <div class="card" id="heart_card">
+            <div class="label-text">Heart Rate</div>
+            <div class="data-val"><span id="bpm_val">--</span><span class="unit">BPM</span></div>
+            <canvas id="pulseChart"></canvas>
+        </div>
+
+        <div class="card">
+            <div class="label-text">Oxygen Level</div>
+            <div class="data-val"><span id="spo2_val">--</span><span class="unit">%</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label-text">Blood Pressure (External Device)</div>
+            <div class="data-val" id="bp_val_container">
+                <span id="bp_display">--/--</span><span class="unit">mmHg</span>
+            </div>
+            <div id="bp_status" style="font-size: 0.8rem; color: #666; margin-top: -10px;">Log reading below</div>
             
-            characteristic.addEventListener('characteristicvaluechanged', (event) => {
-                const value = new TextDecoder().decode(event.target.value);
-                const parts = value.split(',');
-                if (parts.length < 2) return;
+            <div class="bp-input-group">
+                <input type="number" id="sys_input" placeholder="SYS">
+                <span style="color: #444; font-size: 1.5rem;">/</span>
+                <input type="number" id="dia_input" placeholder="DIA">
+                <button onclick="updateBP()" class="btn-sm">Set</button>
+            </div>
+        </div>
+    </div>
 
-                const ir = parseInt(parts[0]);
-                const red = parseInt(parts[1]);
+    <script>
+        let chart;
+        const BUFFER_SIZE = 100;
+        let irBuffer = [];
+        let redBuffer = [];
+        let bpmHistory = [];
 
-                irBuffer.push(ir);
-                redBuffer.push(red);
+        // Initialize Chart
+        const ctx = document.getElementById('pulseChart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(BUFFER_SIZE).fill(''),
+                datasets: [{
+                    data: [],
+                    borderColor: '#00d4ff',
+                    borderWidth: 3,
+                    pointRadius: 0,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                scales: { y: { display: false }, x: { display: false } },
+                plugins: { legend: { display: false } }
+            }
+        });
 
-                if (irBuffer.length > BUFFER_SIZE) {
-                    irBuffer.shift();
-                    redBuffer.shift();
-                }
+        async function connectBLE() {
+            const serviceUuid = "12345678-1234-1234-1234-123456789012";
+            const charUuid = "87654321-4321-4321-4321-210987654321";
 
-                updateVisualization(ir);
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'QT_Py_ESP32S3' }],
+                    optionalServices: [serviceUuid]
+                });
 
-                // Run calculation every 10 samples (sliding window)
-                if (irBuffer.length === BUFFER_SIZE && ir % 10 === 0) {
-                    processVitals();
-                }
-            });
+                const server = await device.gatt.connect();
+                document.getElementById('status').innerText = "Connected";
+                document.getElementById('status').classList.add('connected');
+                document.getElementById('connectBtn').style.display = 'none';
 
-        } catch (error) {
-            console.error(error);
-            alert("Connection failed.");
-        }
-    }
+                const service = await server.getPrimaryService(serviceUuid);
+                const characteristic = await service.getCharacteristic(charUuid);
 
-    function updateVisualization(val) {
-        chart.data.datasets[0].data.push(val);
-        if (chart.data.datasets[0].data.length > BUFFER_SIZE) chart.data.datasets[0].data.shift();
-        chart.update('none');
-    }
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleData);
 
-    function processVitals() {
-        // --- 1. PRE-PROCESSING ---
-        const irMax = Math.max(...irBuffer);
-        const irMin = Math.min(...irBuffer);
-        const irAvg = irBuffer.reduce((a, b) => a + b) / irBuffer.length;
-        const irAC = irMax - irMin;
-        
-        const redMax = Math.max(...redBuffer);
-        const redMin = Math.min(...redBuffer);
-        const redAvg = redBuffer.reduce((a, b) => a + b) / redBuffer.length;
-        const redAC = redMax - redMin;
-
-        // --- 2. PEAK DETECTION (With Noise Filter) ---
-        let peaks = 0;
-        // Sensitivity: Must be at least 10% above average to count as a peak
-        const threshold = irAvg + (irAC * 0.1); 
-        
-        for (let i = 1; i < irBuffer.length - 1; i++) {
-            if (irBuffer[i] > threshold && 
-                irBuffer[i] > irBuffer[i-1] && 
-                irBuffer[i] > irBuffer[i+1]) {
-                peaks++;
-                i += 4; // Skip a few samples to avoid "double counting" the same peak
+            } catch (error) {
+                alert("Connection failed. Ensure Bluetooth is on and device is in range.");
             }
         }
-        
-        // --- 3. CALCULATION ---
-        const samplingRate = 20; // Matches delay(50) on ESP32
-        const durationSeconds = BUFFER_SIZE / samplingRate;
-        const rawBpm = (peaks / durationSeconds) * 60;
 
-        // SpO2 Ratio of Ratios
-        const R = (redAC / redAvg) / (irAC / irAvg);
-        let spo2 = 110 - (25 * R);
-        if (spo2 > 100) spo2 = 100;
-        if (spo2 < 85) spo2 = 85; // Floor it to avoid wild drops
+        function handleData(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            const [ir, red] = value.split(',').map(Number);
 
-        // --- 4. SMOOTHING (Moving Average) ---
-        if (rawBpm > 45 && rawBpm < 160) {
-            bpmHistory.push(rawBpm);
-            if (bpmHistory.length > SMOOTHING_WINDOW) bpmHistory.shift();
-            
-            const smoothedBpm = bpmHistory.reduce((a, b) => a + b) / bpmHistory.length;
+            irBuffer.push(ir);
+            redBuffer.push(red);
 
-            // Update UI
-            document.getElementById('bpm_val').innerText = Math.round(smoothedBpm);
-            document.getElementById('spo2_val').innerText = Math.round(spo2);
+            if (irBuffer.length > BUFFER_SIZE) {
+                irBuffer.shift();
+                redBuffer.shift();
+            }
+
+            // Update Chart
+            chart.data.datasets[0].data = [...irBuffer];
+            chart.update('none');
+
+            // Calculate every 10 samples
+            if (irBuffer.length === BUFFER_SIZE && ir % 10 === 0) {
+                processVitals();
+            }
         }
-    }
-</script>
+
+        function processVitals() {
+            const irAvg = irBuffer.reduce((a, b) => a + b) / irBuffer.length;
+            const irMax = Math.max(...irBuffer);
+            const irMin = Math.min(...irBuffer);
+            const irAC = irMax - irMin;
+
+            const redAvg = redBuffer.reduce((a, b) => a + b) / redBuffer.length;
+            const redAC = Math.max(...redBuffer) - Math.min(...redBuffer);
+
+            // 1. Peak Detection with Hysteresis
+            let peaks = 0;
+            const threshold = irAvg + (irAC * 0.15); // Higher threshold for stability
+            for (let i = 1; i < irBuffer.length - 1; i++) {
+                if (irBuffer[i] > threshold && irBuffer[i] > irBuffer[i-1] && irBuffer[i] > irBuffer[i+1]) {
+                    peaks++;
+                    i += 5; // Skip samples to prevent double-counting
+                }
+            }
+
+            // 2. Heart Rate Smoothing
+            const samplingRate = 20; // Matches ESP32 delay(50)
+            const rawBpm = (peaks / (BUFFER_SIZE / samplingRate)) * 60;
+
+            if (rawBpm > 45 && rawBpm < 160) {
+                bpmHistory.push(rawBpm);
+                if (bpmHistory.length > 5) bpmHistory.shift();
+                const avgBpm = bpmHistory.reduce((a, b) => a + b) / bpmHistory.length;
+                document.getElementById('bpm_val').innerText = Math.round(avgBpm);
+                
+                // Pulse Animation
+                const card = document.getElementById('heart_card');
+                card.classList.remove('beat');
+                void card.offsetWidth; // Trigger reflow
+                card.classList.add('beat');
+            }
+
+            // 3. SpO2 Estimation
+            const R = (redAC / redAvg) / (irAC / irAvg);
+            let spo2 = 110 - (25 * R);
+            if (spo2 > 100) spo2 = 100;
+            if (spo2 < 88) spo2 = "--"; // Filter out noise
+            document.getElementById('spo2_val').innerText = (spo2 === "--") ? "--" : Math.round(spo2);
+        }
+
+        function updateBP() {
+            const sys = parseInt(document.getElementById('sys_input').value);
+            const dia = parseInt(document.getElementById('dia_input').value);
+            const display = document.getElementById('bp_display');
+            const status = document.getElementById('bp_status');
+
+            if (!sys || !dia) return;
+
+            display.innerText = `${sys}/${dia}`;
+
+            if (sys < 120 && dia < 80) {
+                status.innerText = "NORMAL";
+                display.style.color = "#00ff00";
+            } else if (sys < 130 && dia < 80) {
+                status.innerText = "ELEVATED";
+                display.style.color = "#ffff00";
+            } else {
+                status.innerText = "HYPERTENSION (HIGH)";
+                display.style.color = "#ff4444";
+            }
+        }
+    </script>
+</body>
+</html>

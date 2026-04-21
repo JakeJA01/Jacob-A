@@ -174,28 +174,27 @@
                 alert("Connection failed. Ensure Bluetooth is on and device is in range.");
             }
         }
+function handleData(event) {
+    const value = new TextDecoder().decode(event.target.value);
+    // Split the 3 values: Green, Red, IR
+    const [green, red, ir] = value.split(',').map(Number);
 
-        function handleData(event) {
-            const value = new TextDecoder().decode(event.target.value);
-            const [ir, red] = value.split(',').map(Number);
+    // Use IR for the chart and calculations as before
+    irBuffer.push(ir); 
+    redBuffer.push(red);
 
-            irBuffer.push(ir);
-            redBuffer.push(red);
+    if (irBuffer.length > BUFFER_SIZE) {
+        irBuffer.shift();
+        redBuffer.shift();
+    }
 
-            if (irBuffer.length > BUFFER_SIZE) {
-                irBuffer.shift();
-                redBuffer.shift();
-            }
+    chart.data.datasets[0].data = [...irBuffer];
+    chart.update('none');
 
-            // Update Chart
-            chart.data.datasets[0].data = [...irBuffer];
-            chart.update('none');
-
-            // Calculate every 10 samples
-            if (irBuffer.length === BUFFER_SIZE && ir % 10 === 0) {
-                processVitals();
-            }
-        }
+    if (irBuffer.length === BUFFER_SIZE && ir % 10 === 0) {
+        processVitals();
+    }
+}
 
         function processVitals() {
             const irAvg = irBuffer.reduce((a, b) => a + b) / irBuffer.length;

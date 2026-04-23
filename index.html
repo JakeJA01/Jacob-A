@@ -3,119 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyHealthApp - Calibrated</title>
+    <title>MyHealthApp</title>
+    
     <style>
-        body { font-family: -apple-system, sans-serif; background: #000; color: white; text-align: center; padding: 20px; }
-        .display-card { background: #1a1a1a; padding: 30px; border-radius: 20px; margin-bottom: 20px; border: 1px solid #333; }
-        .bp-value { font-size: 4em; font-weight: bold; color: #00ff00; }
-        .label { color: #888; text-transform: uppercase; letter-spacing: 1px; }
-        
-        #calibration-ui { background: #222; padding: 20px; border-radius: 15px; border-left: 5px solid #007AFF; text-align: left; }
-        input { width: 70px; padding: 10px; border-radius: 8px; border: none; margin-right: 10px; background: #333; color: white; font-size: 16px; }
-        button { background: #007AFF; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
-        .status { color: #555; font-size: 0.8em; margin-top: 10px; }
+        /* INSERT YOUR ORIGINAL CSS HERE */
+        body { 
+            /* This is a placeholder: keep your original background and font styles */
+            font-family: sans-serif; 
+        }
+
+        /* NEW: Minimal Calibration Overlay - hidden by default */
+        #cal-overlay {
+            position: fixed;
+            bottom: -100%; /* Hidden off-screen */
+            left: 0;
+            width: 100%;
+            background: rgba(30, 30, 30, 0.95);
+            transition: bottom 0.3s ease;
+            padding: 20px;
+            box-sizing: border-box;
+            border-top: 2px solid #007AFF;
+            z-index: 1000;
+        }
+        #cal-overlay.active { bottom: 0; }
+        .cal-btn { background: #007AFF; color: white; border: none; padding: 10px; border-radius: 5px; }
     </style>
 </head>
 <body>
 
-    <h1>MyHealthApp</h1>
-
-    <div class="display-card">
-        <div class="label">Blood Pressure (Calibrated)</div>
-        <div class="bp-value" id="bp-display">-- / --</div>
-        <div class="status" id="status-text">Disconnected</div>
+    <div id="main-display">
+        <h1 id="sbp-label">0</h1>
+        <h1 id="dbp-label">0</h1>
     </div>
 
-    <div id="calibration-ui">
-        <h3 style="margin: 0 0 10px 0;">Personal Calibration</h3>
-        <p style="font-size: 0.9em; color: #ccc;">Enter your manual cuff reading to sync the sensor:</p>
-        
-        <div style="margin-bottom: 15px;">
-            <input type="number" id="manualSBP" placeholder="Sys">
-            <input type="number" id="manualDBP" placeholder="Dia">
-            <button onclick="saveCalibration()">Sync</button>
-        </div>
-        
-        <button id="connectBtn" style="background: #28a745; width: 100%;">Connect ESP32-S3</button>
+    <button onclick="toggleCal()" style="position:fixed; top:10px; right:10px; opacity:0.5;">⚙️ Calibrate</button>
+
+    <div id="cal-overlay">
+        <h3 style="color:white; margin-top:0;">Sync Manual Reading</h3>
+        <input type="number" id="manualSBP" placeholder="Sys" style="width:60px; padding:5px;">
+        <input type="number" id="manualDBP" placeholder="Dia" style="width:60px; padding:5px;">
+        <button class="cal-btn" onclick="saveCalibration()">Save Offset</button>
+        <button onclick="toggleCal()" style="background:none; color:gray; border:none; margin-left:10px;">Close</button>
     </div>
 
     <script>
-        // --- CALIBRATION LOGIC ---
-        // Load saved offsets from the iPhone's storage
+        // --- 1. PRESERVE YOUR ORIGINAL BLE LOGIC ---
+        // Keep your handleData, connect, and UUID logic here.
+
+        // --- 2. INTEGRATE CALIBRATION VARIABLES ---
         let sbpOffset = parseFloat(localStorage.getItem('sbp_offset')) || 0;
         let dbpOffset = parseFloat(localStorage.getItem('dbp_offset')) || 0;
         
-        // Variables to hold the raw values from ESP32
-        let lastRawSBP = 0;
+        // These should be updated by your existing BLE data stream
+        let lastRawSBP = 0; 
         let lastRawDBP = 0;
+
+        function toggleCal() {
+            document.getElementById('cal-overlay').classList.toggle('active');
+        }
 
         function saveCalibration() {
             const mSBP = parseFloat(document.getElementById('manualSBP').value);
             const mDBP = parseFloat(document.getElementById('manualDBP').value);
 
             if (mSBP && mDBP && lastRawSBP > 0) {
-                // Calculate the difference between reality (cuff) and sensor
                 sbpOffset = mSBP - lastRawSBP;
                 dbpOffset = mDBP - lastRawDBP;
-
-                // Store it permanently on this phone
                 localStorage.setItem('sbp_offset', sbpOffset);
                 localStorage.setItem('dbp_offset', dbpOffset);
-
-                alert("Calibration successful! Your personal offset is saved.");
-                updateUI();
+                alert("Calibration Updated!");
+                toggleCal();
             } else {
-                alert("Please connect the sensor and get a reading first.");
+                alert("Wait for sensor data before calibrating.");
             }
         }
 
-        // --- BLE LOGIC (FOR BLUEFY) ---
-        const connectBtn = document.getElementById('connectBtn');
-        const bpDisplay = document.getElementById('bp-display');
-        const statusText = document.getElementById('status-text');
+        // --- 3. APPLY OFFSETS TO YOUR UI ---
+        // Find the spot in your original code where you update the text:
+        // document.getElementById('sbp-label').innerText = ...
+        
+        function updateDisplay(rawSBP, rawDBP) {
+            lastRawSBP = rawSBP;
+            lastRawDBP = rawDBP;
 
-        connectBtn.addEventListener('click', async () => {
-            try {
-                statusText.innerText = "Searching for ESP32...";
-                const device = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true,
-                    optionalServices: ['battery_service'] // Replace with your actual service UUID
-                });
+            // Apply offsets
+            const finalSBP = Math.round(rawSBP + sbpOffset);
+            const finalDBP = Math.round(rawDBP + dbpOffset);
 
-                const server = await device.gatt.connect();
-                statusText.innerText = "Connected!";
-                
-                // Note: Replace these UUIDs with the ones from your ESP32-S3 code
-                // This is where the ESP32 sends the blood pressure data
-                device.addEventListener('gattserverdisconnected', () => {
-                    statusText.innerText = "Disconnected";
-                });
-
-                // EXAMPLE: Listening for notifications
-                // const service = await server.getPrimaryService('your_service_uuid');
-                // const characteristic = await service.getCharacteristic('your_char_uuid');
-                // characteristic.startNotifications();
-                // characteristic.addEventListener('characteristicvaluechanged', handleData);
-
-            } catch (error) {
-                statusText.innerText = "Error: " + error;
-            }
-        });
-
-        function handleData(event) {
-            let value = event.target.value;
-            // Assuming ESP32 sends two bytes: [SBP, DBP]
-            lastRawSBP = value.getUint8(0);
-            lastRawDBP = value.getUint8(1);
-            updateUI();
-        }
-
-        function updateUI() {
-            // Apply the "Personal Offset" to the raw sensor data
-            const finalSBP = Math.round(lastRawSBP + sbpOffset);
-            const finalDBP = Math.round(lastRawDBP + dbpOffset);
-            
-            bpDisplay.innerText = `${finalSBP} / ${finalDBP}`;
+            // Use your original element IDs here
+            document.getElementById('sbp-label').innerText = finalSBP;
+            document.getElementById('dbp-label').innerText = finalDBP;
         }
     </script>
 </body>

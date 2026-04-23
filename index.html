@@ -3,96 +3,286 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyHealthApp</title>
-    
+    <title>Advanced Vitals Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* INSERT YOUR ORIGINAL CSS HERE */
-        body { 
-            /* This is a placeholder: keep your original background and font styles */
-            font-family: sans-serif; 
+        :root {
+            --bg: #0f0f0f;
+            --card-bg: #1a1a1a;
+            --accent: #00d4ff;
+            --success: #00ff00;
+            --warning: #ffff00;
+            --danger: #ff4444;
         }
 
-        /* NEW: Minimal Calibration Overlay - hidden by default */
-        #cal-overlay {
-            position: fixed;
-            bottom: -100%; /* Hidden off-screen */
-            left: 0;
-            width: 100%;
-            background: rgba(30, 30, 30, 0.95);
-            transition: bottom 0.3s ease;
-            padding: 20px;
-            box-sizing: border-box;
-            border-top: 2px solid #007AFF;
-            z-index: 1000;
+        body { 
+            font-family: 'Segoe UI', system-ui, sans-serif; 
+            background: var(--bg); 
+            color: white; 
+            margin: 0; 
+            padding: 20px; 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
-        #cal-overlay.active { bottom: 0; }
-        .cal-btn { background: #007AFF; color: white; border: none; padding: 10px; border-radius: 5px; }
+
+        h1 { font-weight: 300; color: var(--accent); margin-bottom: 5px; }
+        #status { font-size: 0.9rem; margin-bottom: 20px; color: var(--danger); text-transform: uppercase; letter-spacing: 2px; }
+        .connected { color: var(--success) !important; text-shadow: 0 0 10px rgba(0,255,0,0.3); }
+
+        .container { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 20px; 
+            width: 100%; 
+            max-width: 500px; 
+        }
+
+        .card { 
+            background: var(--card-bg); 
+            border-radius: 24px; 
+            padding: 25px; 
+            border: 1px solid #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: transform 0.2s ease;
+        }
+
+        .label-text { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 1.5px; }
+        
+        .data-val { 
+            font-size: 4rem; 
+            font-weight: 800; 
+            margin: 5px 0; 
+            font-family: 'Courier New', monospace;
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+        }
+
+        .unit { font-size: 1.2rem; color: var(--accent); margin-left: 8px; font-weight: 400; }
+
+        .bp-input-group { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px; }
+        input[type="number"] { 
+            background: #252525; border: 1px solid #444; color: white; padding: 12px; 
+            border-radius: 12px; width: 70px; font-size: 1.2rem; text-align: center;
+        }
+        
+        button { 
+            background: var(--accent); color: black; border: none; padding: 15px 30px; 
+            border-radius: 50px; font-weight: bold; cursor: pointer; transition: 0.3s; 
+        }
+        .btn-sm { padding: 10px 20px; font-size: 0.8rem; }
+        button:active { transform: scale(0.95); opacity: 0.8; }
+
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
+            70% { box-shadow: 0 0 0 15px rgba(0, 212, 255, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0); }
+        }
+        .beat { animation: pulse-ring 0.5s cubic-bezier(0.215, 0.61, 0.355, 1); }
+
+        canvas { height: 180px !important; margin-top: 10px; }
     </style>
 </head>
 <body>
 
-    <div id="main-display">
-        <h1 id="sbp-label">0</h1>
-        <h1 id="dbp-label">0</h1>
-    </div>
+    <h1>Vitals Monitor</h1>
+    <div id="status">Disconnected</div>
+    <button id="connectBtn" onclick="connectBLE()" style="margin-bottom: 30px;">Connect Sensor</button>
 
-    <button onclick="toggleCal()" style="position:fixed; top:10px; right:10px; opacity:0.5;">⚙️ Calibrate</button>
+    <div class="container">
+        <div class="card" id="heart_card">
+            <div class="label-text">Heart Rate</div>
+            <div class="data-val"><span id="bpm_val">--</span><span class="unit">BPM</span></div>
+            <canvas id="pulseChart"></canvas>
+        </div>
 
-    <div id="cal-overlay">
-        <h3 style="color:white; margin-top:0;">Sync Manual Reading</h3>
-        <input type="number" id="manualSBP" placeholder="Sys" style="width:60px; padding:5px;">
-        <input type="number" id="manualDBP" placeholder="Dia" style="width:60px; padding:5px;">
-        <button class="cal-btn" onclick="saveCalibration()">Save Offset</button>
-        <button onclick="toggleCal()" style="background:none; color:gray; border:none; margin-left:10px;">Close</button>
+        <div class="card">
+            <div class="label-text">Oxygen Level</div>
+            <div class="data-val"><span id="spo2_val">--</span><span class="unit">%</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label-text">Blood Pressure (Calibrated)</div>
+            <div class="data-val" id="bp_val_container">
+                <span id="bp_display">--/--</span><span class="unit">mmHg</span>
+            </div>
+            <div id="bp_status" style="font-size: 0.8rem; color: #666; margin-top: -10px;">Sync with manual cuff</div>
+            
+            <div class="bp-input-group">
+                <input type="number" id="sys_input" placeholder="SYS">
+                <span style="color: #444; font-size: 1.5rem;">/</span>
+                <input type="number" id="dia_input" placeholder="DIA">
+                <button onclick="updateBP()" class="btn-sm">Set</button>
+            </div>
+        </div>
     </div>
 
     <script>
-        // --- 1. PRESERVE YOUR ORIGINAL BLE LOGIC ---
-        // Keep your handleData, connect, and UUID logic here.
+        let chart;
+        const BUFFER_SIZE = 100;
+        let irBuffer = [];
+        let redBuffer = [];
+        let bpmHistory = [];
 
-        // --- 2. INTEGRATE CALIBRATION VARIABLES ---
+        // --- CALIBRATION VARIABLES ---
         let sbpOffset = parseFloat(localStorage.getItem('sbp_offset')) || 0;
         let dbpOffset = parseFloat(localStorage.getItem('dbp_offset')) || 0;
-        
-        // These should be updated by your existing BLE data stream
-        let lastRawSBP = 0; 
-        let lastRawDBP = 0;
+        let lastRawSBP = 110; // Default baseline
+        let lastRawDBP = 70;  // Default baseline
 
-        function toggleCal() {
-            document.getElementById('cal-overlay').classList.toggle('active');
-        }
+        // Initialize Chart
+        const ctx = document.getElementById('pulseChart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Array(BUFFER_SIZE).fill(''),
+                datasets: [{
+                    data: [],
+                    borderColor: '#00d4ff',
+                    borderWidth: 3,
+                    pointRadius: 0,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                scales: { y: { display: false }, x: { display: false } },
+                plugins: { legend: { display: false } }
+            }
+        });
 
-        function saveCalibration() {
-            const mSBP = parseFloat(document.getElementById('manualSBP').value);
-            const mDBP = parseFloat(document.getElementById('manualDBP').value);
+        async function connectBLE() {
+            const serviceUuid = "12345678-1234-1234-1234-123456789012";
+            const charUuid = "87654321-4321-4321-4321-210987654321";
 
-            if (mSBP && mDBP && lastRawSBP > 0) {
-                sbpOffset = mSBP - lastRawSBP;
-                dbpOffset = mDBP - lastRawDBP;
-                localStorage.setItem('sbp_offset', sbpOffset);
-                localStorage.setItem('dbp_offset', dbpOffset);
-                alert("Calibration Updated!");
-                toggleCal();
-            } else {
-                alert("Wait for sensor data before calibrating.");
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'QT_Py_ESP32S3' }],
+                    optionalServices: [serviceUuid]
+                });
+
+                const server = await device.gatt.connect();
+                document.getElementById('status').innerText = "Connected";
+                document.getElementById('status').classList.add('connected');
+                document.getElementById('connectBtn').style.display = 'none';
+
+                const service = await server.getPrimaryService(serviceUuid);
+                const characteristic = await service.getCharacteristic(charUuid);
+
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleData);
+
+            } catch (error) {
+                alert("Connection failed.");
             }
         }
 
-        // --- 3. APPLY OFFSETS TO YOUR UI ---
-        // Find the spot in your original code where you update the text:
-        // document.getElementById('sbp-label').innerText = ...
-        
-        function updateDisplay(rawSBP, rawDBP) {
-            lastRawSBP = rawSBP;
-            lastRawDBP = rawDBP;
+        function handleData(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            const [ir, red] = value.split(',').map(Number);
 
-            // Apply offsets
-            const finalSBP = Math.round(rawSBP + sbpOffset);
-            const finalDBP = Math.round(rawDBP + dbpOffset);
+            irBuffer.push(ir);
+            redBuffer.push(red);
 
-            // Use your original element IDs here
-            document.getElementById('sbp-label').innerText = finalSBP;
-            document.getElementById('dbp-label').innerText = finalDBP;
+            if (irBuffer.length > BUFFER_SIZE) {
+                irBuffer.shift();
+                redBuffer.shift();
+            }
+
+            chart.data.datasets[0].data = [...irBuffer];
+            chart.update('none');
+
+            if (irBuffer.length === BUFFER_SIZE && ir % 10 === 0) {
+                processVitals();
+            }
+        }
+
+        function processVitals() {
+            const irAvg = irBuffer.reduce((a, b) => a + b) / irBuffer.length;
+            const irAC = Math.max(...irBuffer) - Math.min(...irBuffer);
+            const redAvg = redBuffer.reduce((a, b) => a + b) / redBuffer.length;
+            const redAC = Math.max(...redBuffer) - Math.min(...redBuffer);
+
+            // 1. Basic BP estimation logic (Raw sensor output)
+            // Using a simplified ratio-based baseline for the project
+            lastRawSBP = 110 + (irAC / 100); 
+            lastRawDBP = 70 + (irAC / 150);
+
+            // 2. Apply Personal Calibration Offset
+            const finalSBP = Math.round(lastRawSBP + sbpOffset);
+            const finalDBP = Math.round(lastRawDBP + dbpOffset);
+
+            // Update UI
+            updateDisplay(finalSBP, finalDBP);
+
+            // 3. Heart Rate & SpO2 Logic (Your original code)
+            let peaks = 0;
+            const threshold = irAvg + (irAC * 0.15);
+            for (let i = 1; i < irBuffer.length - 1; i++) {
+                if (irBuffer[i] > threshold && irBuffer[i] > irBuffer[i-1] && irBuffer[i] > irBuffer[i+1]) {
+                    peaks++;
+                    i += 5;
+                }
+            }
+            const samplingRate = 20; 
+            const rawBpm = (peaks / (BUFFER_SIZE / samplingRate)) * 60;
+
+            if (rawBpm > 45 && rawBpm < 160) {
+                bpmHistory.push(rawBpm);
+                if (bpmHistory.length > 5) bpmHistory.shift();
+                const avgBpm = bpmHistory.reduce((a, b) => a + b) / bpmHistory.length;
+                document.getElementById('bpm_val').innerText = Math.round(avgBpm);
+                
+                const card = document.getElementById('heart_card');
+                card.classList.remove('beat');
+                void card.offsetWidth; 
+                card.classList.add('beat');
+            }
+
+            const R = (redAC / redAvg) / (irAC / irAvg);
+            let spo2 = 110 - (25 * R);
+            if (spo2 > 100) spo2 = 100;
+            document.getElementById('spo2_val').innerText = (spo2 < 88) ? "--" : Math.round(spo2);
+        }
+
+        function updateDisplay(sys, dia) {
+            const display = document.getElementById('bp_display');
+            const status = document.getElementById('bp_status');
+            display.innerText = `${sys}/${dia}`;
+
+            if (sys < 120 && dia < 80) {
+                status.innerText = "NORMAL";
+                display.style.color = "#00ff00";
+            } else if (sys < 130 && dia < 80) {
+                status.innerText = "ELEVATED";
+                display.style.color = "#ffff00";
+            } else {
+                status.innerText = "HYPERTENSION";
+                display.style.color = "#ff4444";
+            }
+        }
+
+        // --- THE CALIBRATION BRAINS ---
+        function updateBP() {
+            const sysManual = parseInt(document.getElementById('sys_input').value);
+            const diaManual = parseInt(document.getElementById('dia_input').value);
+
+            if (!sysManual || !diaManual) {
+                alert("Enter cuff reading to sync.");
+                return;
+            }
+
+            // Calculate the difference: (Actual Cuff Reading) - (What sensor currently thinks)
+            sbpOffset = sysManual - lastRawSBP;
+            dbpOffset = diaManual - lastRawDBP;
+
+            // Save to iPhone Local Storage
+            localStorage.setItem('sbp_offset', sbpOffset);
+            localStorage.setItem('dbp_offset', dbpOffset);
+
+            alert("Sensor Synced! Future readings will use this offset.");
+            updateDisplay(sysManual, diaManual);
         }
     </script>
 </body>
